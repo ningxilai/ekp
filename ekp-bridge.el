@@ -5,6 +5,7 @@
 ;; - Soft dependency: only load when websocket is available
 
 ;;; Code:
+(require 'cl-lib)
 (require 'websocket nil t)
 (require 'ansi-color nil t)
 
@@ -56,10 +57,8 @@
                                          (pcase info-type
                                            ("show-message" (message (gethash "content" info nil)))
                                            ("eval-code" (eval (read (gethash "content" info nil))))
-                                           ("fetch-var" (websocket-send-text _ (json-encode (eval (read (gethash "content" info nil))))))))
-                                     (json-parse-error
-                                      (when emacs-conductor-enable-debug
-                                        (message "Received malformed JSON in text frame: %S" text)))))))
+                                           ("fetch-var" (websocket-send-text frame (json-encode (eval (read (gethash "content" info nil))))))))
+                                     (json-parse-error nil)))))
 
                 :on-open (lambda (&ignore)
                            (setq ,client (websocket-open (format "ws://127.0.0.1:%s" ,deno-port))))
