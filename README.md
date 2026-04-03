@@ -2,10 +2,6 @@
 
 Emacs-kp implements the Knuth-Plass optimal line breaking algorithm with full support for CJK (Chinese, Japanese, Korean) and Latin mixed text typesetting.
 
-## Demo
-
-![Demo](./images/demo.gif)
-
 ## Features
 
 - **Optimal Line Breaking**: Uses Knuth-Plass algorithm for globally optimal paragraph layout.
@@ -28,7 +24,7 @@ Emacs-kp implements the Knuth-Plass optimal line breaking algorithm with full su
 ### Installation
 
 ```elisp
-(add-to-list 'load-path "/path/to/emacs-kp-fork")
+(add-to-list 'load-path "/path/to/ekp")
 (require 'ekp)
 ```
 
