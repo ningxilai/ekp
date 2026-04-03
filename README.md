@@ -1,11 +1,10 @@
 # Emacs-KP: Knuth-Plass Line Breaking for Emacs
 
-[中文文档](./readme_zh.md) | [Developer Guide](./DEVELOPER.md)
-
 Emacs-kp implements the Knuth-Plass optimal line breaking algorithm with full support for CJK (Chinese, Japanese, Korean) and Latin mixed text typesetting.
 
 ## Demo
 
+![Demo](./images/demo.gif)
 
 ## Features
 
@@ -13,51 +12,64 @@ Emacs-kp implements the Knuth-Plass optimal line breaking algorithm with full su
 - **CJK Support**: Full support for Chinese, Japanese, Korean with mixed Latin text.
 - **Hyphenation**: Frank Liang's algorithm with language-specific dictionaries.
 - **Text Properties Preserved**: Font faces, colors, and other Emacs text properties are maintained.
-- **C Module Acceleration**: Optional multi-threaded C module for 16-29x speedup.
+- **TypeScript Acceleration**: Optional Deno-based TypeScript module for high-performance DP computation.
+- **Pure Elisp Fallback**: Always works even without TypeScript/Deno.
 - **Automatic Font Handling**: Spacing parameters computed from actual font metrics.
 
 ---
 
-## User Guide
+## Quick Start
 
-### Quick Start
+### Prerequisites
 
-1. **Install Dependencies**:
-   Ensure you have a C compiler if you plan to use the C module (recommended for performance).
+- **Emacs 28.1+**
+- **Deno** (optional, for TypeScript acceleration)
 
-2. **Configuration**:
+### Installation
 
 ```elisp
-(add-to-list 'load-path "/path/to/emacs-kp")
+(add-to-list 'load-path "/path/to/emacs-kp-fork")
 (require 'ekp)
+```
 
-;; Basic usage: justify text to 600 pixels width
+### Basic Usage
+
+```elisp
+;; Justify text to 600 pixels width
 (ekp-pixel-justify "Your paragraph text here..." 600)
 
 ;; Find optimal width in a range (returns (text . optimal-width))
 (ekp-pixel-range-justify "Your text" 400 800)
 ```
 
-### Configuration
+### Enable TypeScript Acceleration (Optional)
 
-#### Language Settings
+```elisp
+;; Enable in Emacs
+(setq ekp-use-deno-bridge t)
+```
+---
+
+## Configuration
+
+### Language Settings
 
 **`ekp-latin-lang`** (default: `"en_US"`)
 
-Primary Latin language for hyphenation. Supported languages are in `dictionaries/` directory:
+Supported languages in `dictionaries/`:
 - `en_US`, `en_GB` - English
 - `de_DE` - German
 - `fr` - French
 - `es` - Spanish
-- And many more...
+- And more...
 
 ```elisp
 (setq ekp-latin-lang "de_DE")
 ```
 
-#### Spacing Parameters
+### Spacing Parameters
 
-Use `ekp-param-set` to configure spacing (in pixels). If not set, defaults are computed automatically from font metrics.
+Use `ekp-param-set` to configure spacing (in pixels):
 
 ```elisp
 (ekp-param-set lws-ideal lws-stretch lws-shrink
@@ -71,7 +83,7 @@ Use `ekp-param-set` to configure spacing (in pixels). If not set, defaults are c
 | `mws-*` | Mixed Word Space: between Latin and CJK |
 | `cws-*` | CJK Word Space: between CJK characters |
 
-#### K-P Algorithm Parameters
+### K-P Algorithm Parameters
 
 | Variable | Default | Description |
 |:---------|:--------|:------------|
@@ -81,40 +93,28 @@ Use `ekp-param-set` to configure spacing (in pixels). If not set, defaults are c
 | `ekp-last-line-min-ratio` | 0.5 | Minimum fill ratio for last line |
 | `ekp-looseness` | 0 | Target line count offset (±n lines) |
 
-### C Dynamic Module (Recommended)
-
-For large texts, the optional C module provides significant performance improvement through multi-threaded parallel computation.
-
-#### Building
-
-```bash
-cd ekp_c
-make
-```
-*Requirements: C11 compiler, Emacs 27.1+*
-
-#### Loading
-
-```elisp
-(require 'ekp-utils)
-
-;; Load and initialize C module
-(ekp-c-module-load)
-
-;; Optional: Load hyphenation dictionary for C module
-(ekp-c-load-dictionary "en_US")
-```
-
-Once loaded, `ekp-use-c-module` defaults to `t`, and all justification functions will automatically use the C module.
-
 ---
 
-## Algorithm & Architecture
+## Architecture
 
-For a detailed explanation of the internal architecture, algorithms, and API reference, please refer to the **[Developer Guide](./DEVELOPER.md)**.
+```
+ekp.el          - Main Elisp implementation
+ekp-bridge.el   - Fork of deno-bridge (soft dependency)
+ekp.ts          - TypeScript DP implementation (optional)
+dictionaries/   - Hyphenation pattern files
+```
+
+### How It Works
+
+1. **Elisp**: Handles text preprocessing, box/glue construction, font metrics
+2. **TypeScript** (optional): High-performance Knuth-Plass DP computation via deno-bridge
+3. **Fallback**: Pure Elisp DP when TypeScript is unavailable
+
+---
 
 ## Credits
 
 - **Core Algorithm**: ["Breaking Paragraphs into Lines"](https://gwern.net/doc/design/typography/tex/1981-knuth.pdf) by Donald E. Knuth and Michael F. Plass (1981)
 - **Hyphenation**: Adapted from [Pyphen](https://github.com/Kozea/Pyphen), using Liang's algorithm
 - **Dictionaries**: [Hunspell hyphenation patterns](https://github.com/Kozea/Pyphen)
+- **deno-bridge**: [Andy Stewart](https://github.com/manateelazycat/deno-bridge)
