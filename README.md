@@ -12,8 +12,6 @@ Emacs-kp implements the Knuth-Plass optimal line breaking algorithm with full su
 - **Pure Elisp Fallback**: Always works even without TypeScript/Deno.
 - **Automatic Font Handling**: Spacing parameters computed from actual font metrics.
 
----
-
 ## Quick Start
 
 ### Prerequisites
@@ -44,7 +42,6 @@ Emacs-kp implements the Knuth-Plass optimal line breaking algorithm with full su
 ;; Enable in Emacs
 (setq ekp-use-deno-bridge t)
 ```
----
 
 ## Configuration
 
@@ -89,8 +86,6 @@ Use `ekp-param-set` to configure spacing (in pixels):
 | `ekp-last-line-min-ratio` | 0.5 | Minimum fill ratio for last line |
 | `ekp-looseness` | 0 | Target line count offset (±n lines) |
 
----
-
 ## Architecture
 
 ```
@@ -105,8 +100,6 @@ dictionaries/   - Hyphenation pattern files
 1. **Elisp**: Handles text preprocessing, box/glue construction, font metrics
 2. **TypeScript** (optional): High-performance Knuth-Plass DP computation via deno-bridge
 3. **Fallback**: Pure Elisp DP when TypeScript is unavailable
-
----
 
 ## Credits
 
