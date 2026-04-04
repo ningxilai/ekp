@@ -89,7 +89,7 @@
               (with-current-buffer (process-buffer p)
                 (ansi-color-apply-on-region (point-min) (point-max))))))
 
-         (add-to-list 'ekp-bridge-app-list ,app-name t)))))
+         (add-to-list 'ekp-bridge-app-list ,app-name t))))
 
 (defun ekp-bridge-exit ()
   (interactive)
