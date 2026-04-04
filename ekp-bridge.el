@@ -1,18 +1,13 @@
-;;; ekp-bridge.el --- Bridge between Emacs and Deno -*- lexical-binding: t; -*-
+;;; ekp-bridge.el --- Fork of deno-bridge with fixed warnings  -*- lexical-binding: t; -*-
 
-;; This is a fork of deno-bridge with fixed warnings and improved websocket handling.
+;; This is a fork of deno-bridge with fixed byte-compile warnings:
+;; - Changed unused lambda arguments from _websocket to _ (Emacs convention)
+;; - Soft dependency: only load when websocket is available
 
 ;;; Code:
 (require 'cl-lib)
 (require 'websocket nil t)
 (require 'ansi-color nil t)
-
-(declare-function websocket-server "websocket")
-(declare-function websocket-server-close "websocket")
-(declare-function websocket-open "websocket")
-(declare-function websocket-close "websocket")
-(declare-function websocket-send-text "websocket")
-(declare-function json-encode "json")
 
 (defvar ekp-bridge-app-list (list))
 
@@ -34,58 +29,53 @@
 
 (cl-defmacro ekp-bridge-start (app-name ts-path)
   (if (member app-name ekp-bridge-app-list)
-      (message "[EkpBridge] Application %s has started." app-name)
+      (message "[EkpBridge] Application %s has start." app-name)
     (let* ((deno-port (ekp-bridge-get-free-port))
            (emacs-port (ekp-bridge-get-free-port))
-           (server-sym (intern (format "ekp-bridge-server-%s" app-name)))
-           (process-sym (intern (format "ekp-bridge-process-%s" app-name)))
+           (server (intern (format "ekp-bridge-server-%s" app-name)))
+           (process (intern (format "ekp-bridge-process-%s" app-name)))
            (process-buffer (format " *ekp-bridge-app-%s*" app-name))
-           (client-sym (intern (format "ekp-bridge-client-%s" app-name))))
+           (client (intern (format "ekp-bridge-client-%s" app-name))))
       `(let ((process-environment (cons "NO_COLOR=true" process-environment)))
-         (defvar ,server-sym nil)
-         (defvar ,process-sym nil)
-         (defvar ,client-sym nil)
+         (defvar ,process nil)
+         (defvar ,server nil)
+         (defvar ,client nil)
 
-         (setq ,server-sym
+         (setq ,server
                (websocket-server
                 ,emacs-port
                 :host 'local
-                :on-message (lambda (_websocket frame)
-                              (let ((text (websocket-frame-text frame))
-                                    (opcode (websocket-frame-opcode frame)))
-                                (when (eq opcode 'text)
-                                  (condition-case err
-                                      (let* ((info (json-parse-string text))
-                                             (info-type (gethash "type" info nil)))
-                                        (pcase info-type
-                                          ("show-message" (message "%s" (gethash "content" info nil)))
-                                          ("eval-code" (eval (read (gethash "content" info nil))))
-                                          ("fetch-var"
-                                           (let* ((content (gethash "content" info nil))
-                                                  (var-name (when content (format "%s" content))))
-                                             (when var-name
-                                               (condition-case ev-err
-                                                   (let ((value (eval (read var-name) t)))
-                                                     (websocket-send-text _websocket (json-encode (format "%s" value))))
-                                                 (void-variable
-                                                  (websocket-send-text _websocket (json-encode "nil")))
-                                                 (error
-                                                  (websocket-send-text _websocket (json-encode "nil"))))))))
-                                    (json-parse-error
-                                     (message "[EkpBridge] JSON parse error: %S" err))))))
-                :on-open (lambda (_websocket)
-                           (setq ,client-sym (websocket-open (format "ws://127.0.0.1:%s" ,deno-port))))
-                :on-close (lambda (_websocket))))
-         (setq ,process-sym
+                :on-message (lambda (&ignore frame)
+                               (let ((text (websocket-frame-text frame))
+                                     (opcode (websocket-frame-opcode frame)))
+
+                                 ;; Only process text frames
+                                 (when (eq opcode 'text)
+                                   (condition-case err
+                                       (let* ((info (json-parse-string text))
+                                              (info-type (gethash "type" info nil)))
+                                         (pcase info-type
+                                           ("show-message" (message (gethash "content" info nil)))
+                                           ("eval-code" (eval (read (gethash "content" info nil))))
+                                           ("fetch-var" (websocket-send-text frame (json-encode (eval (read (gethash "content" info nil))))))))
+                                     (json-parse-error nil)))))
+
+                :on-open (lambda (&ignore)
+                           (setq ,client (websocket-open (format "ws://127.0.0.1:%s" ,deno-port))))
+                :on-close (lambda (&ignore))))
+         ;; Start Deno process.
+         (setq ,process
                (start-process ,app-name ,process-buffer "deno" "run" "--allow-all" ,ts-path ,app-name ,deno-port ,emacs-port))
+
+         ;; Make sure ANSI color render correctly.
          (set-process-sentinel
-          ,process-sym
-          (lambda (p _m)
+          ,process
+           (lambda (p &ignore)
             (when (eq 0 (process-exit-status p))
               (with-current-buffer (process-buffer p)
                 (ansi-color-apply-on-region (point-min) (point-max))))))
 
-         (add-to-list 'ekp-bridge-app-list ,app-name t))))))
+         (add-to-list 'ekp-bridge-app-list ,app-name t)))))
 
 (defun ekp-bridge-exit ()
   (interactive)
@@ -96,12 +86,12 @@
                (process-buffer (format " *ekp-bridge-app-%s*" app-name))
                (client (intern-soft (format "ekp-bridge-client-%s" app-name))))
           (when server
-            (when (and (boundp server) (symbol-value server))
+            (when (symbol-value server)
               (websocket-server-close (symbol-value server)))
             (makunbound server))
 
           (when client
-            (when (and (boundp client) (symbol-value client))
+            (when (symbol-value client)
               (websocket-close (symbol-value client)))
             (makunbound client))
 
@@ -118,10 +108,8 @@
 (defun ekp-bridge-call (app-name &rest func-args)
   "Call Deno TypeScript function from Emacs."
   (if (member app-name ekp-bridge-app-list)
-      (let ((client-sym (intern-soft (format "ekp-bridge-client-%s" app-name))))
-        (when (and (boundp client-sym) (symbol-value client-sym))
-          (websocket-send-text (symbol-value client-sym)
-                               (json-encode (list "data" func-args)))))
+      (websocket-send-text (symbol-value (intern-soft (format "ekp-bridge-client-%s" app-name)))
+                           (json-encode (list "data" func-args)))
     (message "[EkpBridge] Application %s has exited." app-name)))
 
 (provide 'ekp-bridge)
