@@ -238,7 +238,11 @@ function findPattern(
   h: Hyphenator,
   substr: string,
 ): Pattern | undefined {
-  return h.patterns.get(substr);
+  const pat = h.patterns.get(substr);
+  if (!pat) {
+    console.error("[EKP] findPattern: no pattern for substr:", substr);
+  }
+  return pat;
 }
 
 function computeHyphenation(h: Hyphenator, word: string): number[] {
@@ -862,22 +866,6 @@ async function messageDispatcher(message: string) {
         const gs = funcArgs[5];
         const gst = funcArgs[6];
         const hw = funcArgs[8];
-        const nn = funcArgs[9];
-        const lp = funcArgs[10];
-        console.error("[EKP] break-lines: ip=", funcArgs[1], "n=", nn, "lp=", lp);
-        const result = dpBreakLines(
-          ip,
-          mip,
-          mxp,
-          gi,
-          gs,
-          gst,
-          hyphenPos,
-          hw,
-          nn,
-          lp,
-          currentKP,
-        );
         if (result) {
           const breaksList = result.breaks;
           const evalCode = `(setq ekp--ts-result (cons (list ${breaksList.join(" ")}) ${result.cost}))`;

@@ -60,9 +60,16 @@
                                           ("eval-code"
                                            (eval (read (gethash "content" info nil))))
                                           ("fetch-var"
-                                           ;; -------- 修正3：第一个参数必须是ws ----------
-                                           (websocket-send-text ws
-                                            (json-encode (eval (read (gethash "content" info nil))))))
+                                           (let* ((content (gethash "content" info nil))
+                                                  (var-name (when content (format "%s" content))))
+                                             (when var-name
+                                               (condition-case err
+                                                   (let ((value (eval (read var-name) t)))
+                                                     (websocket-send-text ws (json-encode (format "%s" value))))
+                                                 (void-variable
+                                                  (websocket-send-text ws (json-encode "nil")))
+                                                 (error
+                                                  (websocket-send-text ws (json-encode "nil"))))))))
                                           (_
                                            (message "[EkpBridge] Unhandled type: %S, content: %S"
                                                     info-type (gethash "content" info nil)))))
