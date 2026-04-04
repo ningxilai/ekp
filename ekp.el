@@ -24,6 +24,9 @@
 (require 'cl-lib)
 (require 'ekp-bridge nil t)
 
+(declare-function ekp-bridge-start "ekp-bridge")
+(declare-function ekp-bridge-call "ekp-bridge")
+
 ;;; ============================================================
 ;;; Core Variables
 ;;; ============================================================
@@ -32,7 +35,7 @@
   "Path to this file, for locating dictionaries.")
 
 (defvar ekp-latin-lang "en_US"
-  "Language code for hyphenation (e.g., 'en_US', 'de_DE').")
+  "Language code for hyphenation (e.g., \\='en_US\\=', \\='de_DE\\=').")
 
 (defvar ekp-use-deno-bridge t
   "When non-nil, use deno-bridge for DP computation if available.
@@ -108,7 +111,7 @@ Set to nil to force pure Elisp implementation.")
     (face-attribute 'default :family)))
 
 (defun ekp-word-spacing-pixel (string)
-  (if-let ((font-family (ekp-monospace-p string)))
+  (if-let* ((font-family (ekp-monospace-p string)))
       (string-pixel-width
        (propertize " " 'face `(:family ,font-family)))
     (let* ((letter (ekp-get-latin-letter string))
@@ -117,12 +120,12 @@ Set to nil to force pure Elisp implementation.")
        (propertize " " 'face `(:family ,font-family))))))
 
 (defun ekp-latin-font (string)
-  (if-let ((letter (ekp-get-latin-letter string)))
+  (if-let* ((letter (ekp-get-latin-letter string)))
       (ekp-font-family letter)
     (face-attribute 'default :family)))
 
 (defun ekp-cjk-font (string)
-  (if-let ((letter (ekp-get-cjk-letter string)))
+  (if-let* ((letter (ekp-get-cjk-letter string)))
       (ekp-font-family letter)
     (ekp-font-family "牛")))
 
@@ -182,7 +185,7 @@ Set to nil to force pure Elisp implementation.")
 (defun ekp-split-to-boxes (string)
   "Split STRING into typographic boxes.
 Latin words become single boxes; CJK chars are individual boxes.
-Whitespace runs are preserved as separate boxes; CJK punctuation attaches to preceding char."
+Whitespace runs are preserved; CJK punctuation attaches to preceding char."
   (if (string-blank-p string)
       (vector string)
     (with-temp-buffer
@@ -265,7 +268,7 @@ Whitespace runs are preserved as separate boxes; CJK punctuation attaches to pre
         found)))
 
 (defun ekp-hyphen--parse-pattern (pat)
-  "Parse PAT like 'hy3ph' into (letters offset . values)."
+  "Parse PAT like \\='hy3ph\\=' into (letters offset . values)."
   (let ((pos 0) (len (length pat)) letters values)
     (while (< pos len)
       (let ((digit 0))
@@ -306,7 +309,7 @@ Whitespace runs are preserved as separate boxes; CJK punctuation attaches to pre
                         (lambda (m) (string (string-to-number
                                              (match-string 1 m) 16)))
                         line))
-            (when-let ((parsed (ekp-hyphen--parse-pattern line)))
+            (when-let* ((parsed (ekp-hyphen--parse-pattern line)))
               (puthash (car parsed) (cdr parsed) patterns)
               (setq maxlen (max maxlen (length (car parsed)))))))
         (forward-line 1)))
@@ -914,7 +917,7 @@ Returns (boxes-vector . hyphen-positions-vector)."
           (setq index (1- index)))))
     (cdr breaks)))
 
-(defun ekp--dp-trace-breaks-with-looseness (backptrs line-counts n target-lines
+(defun ekp--dp-trace-breaks-with-looseness (backptrs line-counts n _target-lines
                                                       &optional alt-paths)
   (if (or (= ekp-looseness 0) (null alt-paths))
       (ekp--dp-trace-breaks backptrs n)
@@ -987,7 +990,7 @@ Returns (boxes-vector . hyphen-positions-vector)."
           t)
       (error nil))))
 
-(defun ekp--dp-cache-via-bridge (para string line-pixel)
+(defun ekp--dp-cache-via-bridge (para line-pixel)
   "Compute breaks using deno-bridge with Elisp's pre-computed arrays."
   (let* ((ideal-prefixs (ekp-para-ideal-prefixs para))
          (min-prefixs (ekp-para-min-prefixs para))
@@ -1062,7 +1065,7 @@ If deno-bridge is available, uses it. Otherwise falls back to pure Elisp."
         cached
       (if (and ekp-use-deno-bridge
                ekp--deno-bridge-ready)
-          (or (ekp--dp-cache-via-bridge para string line-pixel)
+          (or (ekp--dp-cache-via-bridge para line-pixel)
               (ekp--dp-cache-elisp para string line-pixel))
         (ekp--dp-cache-elisp para string line-pixel)))))
 
@@ -1191,9 +1194,11 @@ If deno-bridge is available, uses it. Otherwise falls back to pure Elisp."
                            (plist-get params :lws-stretch)
                          (plist-get params :lws-shrink)))
          (mix-change (if stretch-p
-                         (plist-get params :mws-stretch)
-                       (plist-get params :mws-shrink)))
-         (cjk-change (if stretch-p (plist-get params :cws-stretch) 0))
+                          (plist-get params :mws-stretch)
+                        (plist-get params :mws-shrink)))
+         (cjk-change (if stretch-p
+                          (plist-get params :cws-stretch)
+                        (plist-get params :cws-shrink)))
          (latin-adj 0) (latin-extra 0)
          (mix-adj 0) (mix-extra 0)
          (cjk-adj 0) (cjk-extra 0))
@@ -1215,8 +1220,13 @@ If deno-bridge is available, uses it. Otherwise falls back to pure Elisp."
           (setq mix-adj mix-change)
           (setq remaining (- remaining mix-capacity)))))
     (when (and (> remaining 0) (> cjk-gaps 0))
-      (setq cjk-adj (/ remaining cjk-gaps))
-      (setq cjk-extra (% remaining cjk-gaps)))
+      (let ((cjk-capacity (* cjk-gaps cjk-change)))
+        (if (< remaining cjk-capacity)
+            (progn
+              (setq cjk-adj (/ remaining cjk-gaps))
+              (setq cjk-extra (% remaining cjk-gaps)))
+          (setq cjk-adj cjk-change)
+          (setq remaining (- remaining cjk-capacity)))))
     (list (cons latin-adj latin-extra)
           (cons mix-adj mix-extra)
           (cons cjk-adj cjk-extra))))
@@ -1440,17 +1450,12 @@ If deno-bridge is available, uses it. Otherwise falls back to pure Elisp."
 
 (defun ekp-pixel-justify (string line-pixel)
   "Justify multiline STRING to LINE-PIXEL."
-  (let* ((strs (split-string string "\n"))
-         (non-blank-strs (cl-remove-if #'string-blank-p strs)))
+  (let* ((strs (split-string string "\n")))
     (mapconcat (lambda (str)
                  (if (string-blank-p str)
                      ""
                    (ekp--pixel-justify str line-pixel)))
                strs "\n")))
-
-;;; ============================================================
-;;; Optimal Width Search
-;;; ============================================================
 
 (defun ekp--compute-avg-cost (strings pixel)
   (let ((total-cost 0) (count 0))
@@ -1484,12 +1489,12 @@ If deno-bridge is available, uses it. Otherwise falls back to pure Elisp."
 (defun ekp-pixel-range-justify (string min-pixel max-pixel)
   "Find optimal width for STRING between MIN-PIXEL and MAX-PIXEL.
 Returns (justified-text . optimal-pixel)."
-  (let* ((strings (split-string string "\n"))
-         (_ (dolist (s strings)
-              (unless (string-blank-p s)
-                (ekp--get-para s))))
+  (let* ((strs (split-string string "\n"))
+         (non-blank-strs (cl-remove-if #'string-blank-p strs))
+         (_ (dolist (s non-blank-strs)
+              (ekp--get-para s)))
          (best-pixel (ekp--ternary-search-optimal-width
-                      strings min-pixel max-pixel)))
+                      non-blank-strs min-pixel max-pixel)))
     (cons (ekp-pixel-justify string best-pixel) best-pixel)))
 
 ;;; ============================================================

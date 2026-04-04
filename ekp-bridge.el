@@ -7,6 +7,13 @@
 (require 'websocket nil t)
 (require 'ansi-color nil t)
 
+(declare-function websocket-server "websocket")
+(declare-function websocket-server-close "websocket")
+(declare-function websocket-open "websocket")
+(declare-function websocket-close "websocket")
+(declare-function websocket-send-text "websocket")
+(declare-function json-encode "json")
+
 (defvar ekp-bridge-app-list (list))
 
 (defun ekp-bridge-get-free-port ()
