@@ -238,11 +238,7 @@ function findPattern(
   h: Hyphenator,
   substr: string,
 ): Pattern | undefined {
-  const pat = h.patterns.get(substr);
-  if (!pat) {
-    console.error("[EKP] findPattern: no pattern for substr:", substr);
-  }
-  return pat;
+  return h.patterns.get(substr);
 }
 
 function computeHyphenation(h: Hyphenator, word: string): number[] {
@@ -338,6 +334,9 @@ function glueBetween(prevEnd: BoxType, currStart: BoxType): GlueType {
   if (prevEnd === BoxType.SPACE || currStart === BoxType.SPACE) {
     return GlueType.NONE;
   }
+  if (prevEnd === BoxType.CJK_PUNCT || currStart === BoxType.CJK_PUNCT) {
+    return GlueType.CWS;
+  }
   const prevLatin = prevEnd === BoxType.LATIN;
   const currLatin = currStart === BoxType.LATIN;
   if (prevLatin && currLatin) return GlueType.LWS;
@@ -351,63 +350,131 @@ function glueBetween(prevEnd: BoxType, currStart: BoxType): GlueType {
 
 /**
  * Split text into typographic boxes.
+ * Matching ekp.el's ekp-split-to-boxes state machine.
  * Measure function receives the box text and returns pixel width.
  */
 function splitToBoxes(
   text: string,
   measureFn: (s: string) => number,
 ): { boxes: Box[]; hyphenPositions: number[]; hyphenWidth: number } {
-  const codepoints: { cp: number; char: string; start: number; len: number }[] =
-    [];
+  const codepoints: { cp: number; char: string }[] = [];
   let i = 0;
   while (i < text.length) {
     const cp = text.codePointAt(i)!;
     const char = String.fromCodePoint(cp);
-    codepoints.push({ cp, char, start: i, len: char.length });
+    codepoints.push({ cp, char });
     i += char.length;
   }
 
-  // First pass: group into raw boxes
-  const rawBoxes: { text: string; type: BoxType }[] = [];
-  let wordChars: string[] = [];
-  let inLatin = false;
+  // All whitespace → single box
+  if (codepoints.length > 0 && codepoints.every(c => isWhitespace(c.cp))) {
+    const w = measureFn(text);
+    return {
+      boxes: [{
+        text, width: w,
+        type: BoxType.SPACE, startType: BoxType.SPACE, endType: BoxType.SPACE,
+      }],
+      hyphenPositions: [],
+      hyphenWidth: measureFn("-"),
+    };
+  }
 
-  for (const { cp, char } of codepoints) {
-    const type = classifyChar(cp);
-    if (type === BoxType.LATIN) {
-      wordChars.push(char);
-      inLatin = true;
-    } else {
-      if (inLatin && wordChars.length > 0) {
-        rawBoxes.push({ text: wordChars.join(""), type: BoxType.LATIN });
-        wordChars = [];
-        inLatin = false;
-      }
-      rawBoxes.push({ text: char, type });
+  const rawStrs: string[] = [];
+  let state = classifyChar(codepoints[0].cp) === BoxType.LATIN ? 1 : 2;
+  let prevState = 1;
+  let latinWord = "";
+  let cjkChar: string | null = null;
+  let spaces = "";
+
+  function flushCJK() {
+    if (cjkChar !== null) {
+      rawStrs.push(cjkChar);
+      prevState = 2;
+      cjkChar = null;
     }
   }
-  if (wordChars.length > 0) {
-    rawBoxes.push({ text: wordChars.join(""), type: BoxType.LATIN });
+
+  function flushLatin() {
+    if (latinWord) {
+      rawStrs.push(latinWord);
+      prevState = 1;
+      latinWord = "";
+    }
   }
 
-  // Hyphenation: expand Latin words
-  // For now, no hyphenator available from measure context
-  // Hyphenation will be done when hyphenator is provided
-  const boxes: Box[] = [];
-  const hyphenPositions: number[] = [];
-
-  for (const rb of rawBoxes) {
-    const w = measureFn(rb.text);
-    boxes.push({
-      text: rb.text,
-      width: w,
-      type: rb.type,
-      startType: rb.type,
-      endType: rb.type,
-    });
+  function flushSpaces(nextWidth: number) {
+    if (!spaces) return;
+    const cjkInvolved = prevState === 2 || nextWidth === 2;
+    if (rawStrs.length === 0) {
+      rawStrs.push(spaces);
+    } else if (cjkInvolved) {
+      rawStrs.push(spaces);
+    } else if (spaces.length > 1) {
+      rawStrs.push(spaces.substring(0, spaces.length - 1));
+    }
+    spaces = "";
   }
 
-  return { boxes, hyphenPositions, hyphenWidth: measureFn("-") };
+  for (const { cp, char } of codepoints) {
+    if (isWhitespace(cp)) {
+      flushCJK();
+      flushLatin();
+      spaces += char;
+    } else {
+      const width = (isCJK(cp) || isCJKPunct(cp)) ? 2 : 1;
+      flushSpaces(width);
+      if (width === 1) { // Latin
+        if (state === 1) {
+          latinWord += char;
+        } else {
+          flushCJK();
+          latinWord = char;
+          state = 1;
+        }
+      } else { // CJK or CJK_PUNCT
+        if (state === 1) {
+          flushLatin();
+          if (isCJKPunct(cp)) {
+            rawStrs.push(char);
+          } else {
+            cjkChar = char;
+          }
+          state = 2;
+        } else {
+          if (isCJKPunct(cp)) {
+            if (cjkChar !== null) {
+              rawStrs.push(cjkChar + char);
+              cjkChar = null;
+            } else {
+              rawStrs.push(char);
+            }
+          } else {
+            flushCJK();
+            cjkChar = char;
+          }
+        }
+      }
+    }
+  }
+
+  flushCJK();
+  flushLatin();
+  if (spaces) rawStrs.push(spaces);
+
+  const boxes: Box[] = rawStrs.map(s => {
+    const firstCp = s.codePointAt(0)!;
+    const chars = Array.from(s);
+    const lastCp = chars[chars.length - 1].codePointAt(0)!;
+    return {
+      text: s,
+      width: measureFn(s),
+      type: classifyChar(firstCp),
+      startType: classifyChar(firstCp),
+      endType: classifyChar(lastCp),
+    };
+  });
+
+  return { boxes, hyphenPositions: [], hyphenWidth: measureFn("-") };
 }
 
 /**
@@ -566,7 +633,7 @@ function computeBadness(adjustment: number, flexibility: number): number {
   if (flexibility <= 0) return EKP_INFINITY;
   const ratio = adjustment / flexibility;
   const badness = 100 * Math.pow(Math.abs(ratio), 3);
-  return Math.min(10000, badness);
+  return badness > 10000 ? EKP_INFINITY : badness;
 }
 
 function computeFitness(adjustment: number, flexibility: number): number {
@@ -709,16 +776,14 @@ function dpBreakLines(
         break;
       }
 
-      // Valid break?
-      // Single-box lines are always valid (matching C implementation behavior)
-      const isSingleBox = k === i + 1;
-      const valid = isSingleBox ||
-        (minW <= linePixel && maxW >= linePixel) ||
+      // Valid break? (matching C implementation: dp_process_position)
+      const valid = (minW <= linePixel && maxW >= linePixel) ||
         (isLast && ideal <= linePixel);
       if (!valid) continue;
 
       // Compute demerits
       const adjustment = linePixel - ideal;
+      const isSingleBox = k === i + 1;
       const flexibility = adjustment > 0 ? (maxW - ideal) : (ideal - minW);
 
       let badness: number, fit: number, dem: number;
